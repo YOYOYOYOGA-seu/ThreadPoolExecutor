@@ -12,5 +12,7 @@ ThreadPoolExecutor threadPool(8, 4, 1000*1000);
 /* ----------- application ----------- */
 auto res = threadPool.excute([](int a, int b){return a*b;}, 6, 7); 
 auto result = res.get();
-threadPool.shutdown(); //optional, wait for all tasks complete, or ~threadPool() will stop all tasks in waiting.
+/* optional, wait for all tasks complete, or 
+   ~threadPool() will stop all tasks in waiting. */
+threadPool.shutdown(); 
 ```
