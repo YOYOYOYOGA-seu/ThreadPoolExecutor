@@ -1,3 +1,5 @@
 inc
 lib
 src
+obj
+test.elf

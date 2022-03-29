@@ -1,10 +1,10 @@
 /*
  * @Author Shi Zhangkun
  * @Date 2022-03-28 21:52:21
- * @LastEditTime 2022-03-29 01:47:07
+ * @LastEditTime 2022-03-29 20:08:08
  * @LastEditors Shi Zhangkun
  * @Description none
- * @FilePath /test/inc/ThreadPoolExcutor.hpp
+ * @FilePath /test/ThreadPoolExecutor.hpp
  */
 #include <thread>
 #include <vector>
@@ -24,21 +24,19 @@
 #define CPP_VERSION __cplusplus 
 #endif
 
-
-
 class ThreadPoolExecutor {
 private:
   long keepAliveTime;
-  std::atomic<std::size_t> idleWorkers;
-  std::mutex workerMut;
+  std::condition_variable conditionVar;
+  std::mutex workerMut; // protect : workers, inactiveWorkers
   std::vector<std::thread> workers;
   std::queue<std::size_t> inactiveWorkers;
+  std::mutex tasksMut; // protect : idleWorlers, tasks, running
+  std::size_t idleWorkers;
   std::queue<std::function<void()>> tasks;
-  std::mutex tasksMut;
-  std::condition_variable cond;
-  bool __activeWoker(std::size_t index);
   bool running = true;
-  
+
+  bool __activeWoker(std::size_t index);
   ThreadPoolExecutor& operator=(const ThreadPoolExecutor&) = delete;
   ThreadPoolExecutor(const ThreadPoolExecutor&) = delete;
 public:
@@ -54,13 +52,12 @@ public:
   template <class F, class... Args>
   auto excute(F&& f, Args&&... args)->std::future<typename std::result_of<F(Args...)>::type>;
 #endif
-  
 };
 
 /**
- * @brief  
- * @note  
- * @param {*}
+ * @brief  active a worker (thread unsafe function)
+ * @note  you must check the worker lock before call this function (workerMut)
+ * @param {size_t} index
  * @retval none
  */
 bool ThreadPoolExecutor::__activeWoker(std::size_t index)
@@ -72,32 +69,26 @@ bool ThreadPoolExecutor::__activeWoker(std::size_t index)
     {
       std::function<void()> task;
       {
-        idleWorkers++;
+        using namespace std::chrono_literals;
         std::unique_lock<std::mutex> lock(tasksMut);
+        idleWorkers++;
         auto pred = [this](){return (!running || !tasks.empty());};
-        if (this->keepAliveTime > 0)
-        {
-          using namespace std::chrono_literals;
-          cond.wait_for(lock, this->keepAliveTime * 1ms, pred);
-          if (tasks.empty())
-          {
-            inactiveWorkers.push(workerIndex);
-            return;
-          }
-        }
+        if (keepAliveTime > 0)
+          conditionVar.wait_for(lock, keepAliveTime * 1ms, pred);
         else
+          conditionVar.wait(lock, pred);
+        idleWorkers--;
+        if (tasks.empty() && (running == false || keepAliveTime > 0))
         {
-          cond.wait(lock, pred);
-          if (running == false && tasks.empty()) 
+          if (running != false)
           {
+            std::unique_lock<std::mutex> lock(workerMut);
             inactiveWorkers.push(workerIndex);
-            return;
           }
+          return;
         }
-        
         task = std::move(tasks.front());
         tasks.pop();
-        idleWorkers--;
       }
       task();
     }
@@ -106,6 +97,7 @@ bool ThreadPoolExecutor::__activeWoker(std::size_t index)
   workers[index] = std::thread(workerFunc, index);
   return true;
 }
+
 /**
  * @brief  
  * @note  
@@ -119,7 +111,6 @@ ThreadPoolExecutor::ThreadPoolExecutor(std::size_t maxPoolSize, std::size_t core
 {
   idleWorkers = 0;
   if(corePoolSize > maxPoolSize) corePoolSize = maxPoolSize;
-  
   for (int i = 0; i < maxPoolSize; i++)
   {
     std::unique_lock<std::mutex> lock(workerMut);
@@ -153,11 +144,12 @@ void ThreadPoolExecutor::shutdown()
     std::unique_lock<std::mutex> lock(tasksMut);
     running = false;
   }
-  cond.notify_all();
-  for (int i = 0; i < workers.size(); i++)
+  conditionVar.notify_all();
+  for (auto& worker : workers)
   {
-    if (workers[i].joinable())
-      workers[i].join();
+    std::unique_lock<std::mutex> lock(workerMut);
+    if (worker.joinable())
+      worker.join();
   }
 }
 
@@ -174,11 +166,12 @@ void ThreadPoolExecutor::shutdownNow()
     while(!tasks.empty()) tasks.pop();
     running = false;
   }
-  cond.notify_all();
-  for (int i = 0; i < workers.size(); i++)
+  conditionVar.notify_all();
+  for (auto& worker : workers)
   {
-    if (workers[i].joinable())
-      workers[i].join();
+    std::unique_lock<std::mutex> lock(workerMut);
+    if (worker.joinable())
+      worker.join();
   }
 }
 
@@ -221,6 +214,6 @@ auto ThreadPoolExecutor::excute(F&& f, Args&&...args)
     }
     tasks.emplace([task_pack](){(*task_pack)();});
   }
-  cond.notify_one();
+  conditionVar.notify_one();
   return task_pack->get_future();
 }
