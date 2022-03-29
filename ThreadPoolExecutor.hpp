@@ -1,7 +1,7 @@
 /*
  * @Author Shi Zhangkun
  * @Date 2022-03-28 21:52:21
- * @LastEditTime 2022-03-29 20:08:08
+ * @LastEditTime 2022-03-29 20:36:36
  * @LastEditors Shi Zhangkun
  * @Description none
  * @FilePath /test/ThreadPoolExecutor.hpp
@@ -101,9 +101,9 @@ bool ThreadPoolExecutor::__activeWoker(std::size_t index)
 /**
  * @brief  
  * @note  
- * @param {size_t} maxPoolSize
- * @param {size_t} corePoolSize
- * @param {long} keepAliveTime
+ * @param {size_t} maxPoolSize : max threads in this pool
+ * @param {size_t} corePoolSize : initial pool size 
+ * @param {long} keepAliveTime : unit (ms)
  * @retval none
  */
 ThreadPoolExecutor::ThreadPoolExecutor(std::size_t maxPoolSize, std::size_t corePoolSize, long keepAliveTime)
@@ -179,8 +179,9 @@ void ThreadPoolExecutor::shutdownNow()
 /**
  * @brief  
  * @note  
- * @param {*}
- * @retval none
+ * @param {F} &&f: Callable object
+ * @param {Args} &&...args: input parameter
+ * @retval std::future
  */
 #if CPP_VERSION >= 201703L
 template <class F, class... Args>
